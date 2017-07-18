@@ -18,10 +18,10 @@ def decimal_converter(d, values=[]):
 class ethrpc(object):
     def __init__(self, hostname='127.0.0.1',port='8545',ver='2.0'):
         self.http = httplib2.Http()
-        self.hostname = hostname
-        self.port     = port
-        self.header   = {'Content-Type': 'text/plain'}
-        self.version  = ver
+        self.hostname  = hostname
+        self.port      = port
+        self.header    = {'Content-Type': 'text/plain'}
+        self.version   = ver
 
 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -48,7 +48,6 @@ class ethrpc(object):
             body['params']  = params
             body['id']      = id
 
-        print body
 
         if body is not {}:
             response, content = self.doPost(self.get_url(),body)
@@ -85,11 +84,9 @@ class ethrpc(object):
         '''
             Validate the given passphrase and submit transaction.
         '''
-        print weis
         weis_hex = hex(weis)
         tx = {'from': src, 'to': dst, 'value': weis_hex}
         params = [tx, passphrase]
-        #print params
         return self.jsonrpc('personal_sendTransaction', params, 1)
 
 
@@ -98,6 +95,14 @@ class ethrpc(object):
             Returns all the Ethereum account addresses of all keys in the key store.
         '''
         return self.jsonrpc('personal_listAccounts')
+
+
+    def personal_newAccount(self, passphrase):
+        '''
+            Generates a new private key and stores it in the key store directory. The key file is encrypted with the given passphrase. Returns the address of the new account.
+        '''
+        params  = [passphrase]
+        return self.jsonrpc('personal_newAccount', params)
 
 
     def eth_getTransactionByHash(self, tx_hash):
@@ -127,7 +132,7 @@ class ethrpc(object):
             Returns the number of most recent block.
         '''
         rpc_ret = self.jsonrpc('eth_blockNumber', [], 83)
-        rpc_ret['result'] = decimal_converter(rpc_ret, ['result'])
+        rpc_ret = decimal_converter(rpc_ret, ['result'])
         return rpc_ret
 
 
