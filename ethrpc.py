@@ -121,5 +121,13 @@ class ethrpc(object):
         return rpc_ret
 
 
+    def eth_blockNumber(self):
+        '''
+            Returns the number of most recent block.
+        '''
+        rpc_ret = self.jsonrpc('eth_blockNumber', [], 83)
+        rpc_ret['result'] = decimal_converter(rpc_ret, ['result'])
+        return rpc_ret
+
 
 
