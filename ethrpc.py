@@ -85,6 +85,7 @@ class ethrpc(object):
         '''
             Validate the given passphrase and submit transaction.
         '''
+        print weis
         weis_hex = hex(weis)
         tx = {'from': src, 'to': dst, 'value': weis_hex}
         params = [tx, passphrase]
