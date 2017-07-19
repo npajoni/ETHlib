@@ -87,6 +87,7 @@ class ethrpc(object):
         weis_hex = hex(weis)
         tx = {'from': src, 'to': dst, 'value': weis_hex}
         params = [tx, passphrase]
+        print params
         return self.jsonrpc('personal_sendTransaction', params, 1)
 
 
@@ -99,10 +100,29 @@ class ethrpc(object):
 
     def personal_newAccount(self, passphrase):
         '''
-            Generates a new private key and stores it in the key store directory. The key file is encrypted with the given passphrase. Returns the address of the new account.
+            Generates a new private key and stores it in the key store directory. The key file is encrypted 
+            with the given passphrase. Returns the address of the new account.
         '''
         params  = [passphrase]
         return self.jsonrpc('personal_newAccount', params)
+
+
+    def personal_lockAccount(self, address):
+        '''
+            Removes the private key with given address from memory.
+            The account can no longer be used to send transactions.
+        '''
+        params = [address]
+        return self.jsonrpc('personal_lockAccount', params)
+
+
+    def personal_unlockAccount(self, address, passphrase, duration=30):
+        '''
+            Decrypts the key with the given address from the key store.
+        '''
+        params = [address, passphrase, duration]
+        return self.jsonrpc('personal_unlockAccount', params)
+
 
 
     def eth_getTransactionByHash(self, tx_hash):
@@ -134,6 +154,52 @@ class ethrpc(object):
         rpc_ret = self.jsonrpc('eth_blockNumber', [], 83)
         rpc_ret = decimal_converter(rpc_ret, ['result'])
         return rpc_ret
+
+
+    def eth_gasPrice(self):
+        '''
+            Returns the current price per gas in wei.
+        '''
+        rpc_ret = self.jsonrpc('eth_gasPrice', [], 73)
+        if rpc_ret['status'] == 'success':
+            rpc_ret = decimal_converter(rpc_ret, ['result'])
+        return rpc_ret
+
+
+    def eth_estimateGas(self, dst, src= None, weis= None):
+        '''
+            Makes a call or transaction, which won't be added to the blockchain 
+            and returns the used gas, which can be used for estimating the used gas.
+        '''
+        tx = {}
+        if src is not None:
+            tx['from'] = src
+        if weis is not None:
+            tx['value'] = hex(weis)
+        tx['to'] = dst
+        print tx
+        rpc_ret = self.jsonrpc('eth_estimateGas', [tx], 1)
+        if rpc_ret['status'] == 'success':
+            rpc_ret = decimal_converter(rpc_ret, ['result'])
+        return rpc_ret
+
+
+    def eth_sendTransaction(self, src, dst, weis, gas=None, gas_price=None, data=None):
+        '''
+            Creates new message call transaction or a contract creation, if the data field contains code.
+        '''
+        weis_hex = hex(weis)
+        tx = {'from': src, 'to': dst, 'value': weis_hex}
+
+        if gas is not None:
+            tx['gas'] = hex(gas)
+        if gas_price is not None:
+            tx['gasPrice'] = hex(gas_price)
+        if data is not None:
+            tx['data'] = hex(data)
+        params = [tx]
+        print params
+        return self.jsonrpc('eth_sendTransaction', params, 1)
 
 
 

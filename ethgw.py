@@ -6,7 +6,6 @@ from flask import Flask
 from flask import request
 from flask import jsonify
 from flask import Response
-from settings import WALLET
 
 import os
 import time
@@ -15,9 +14,6 @@ import hashlib
 
 import logging
 from logging.handlers import RotatingFileHandler
-
-
-
 
 
 class passdbException(Exception):
@@ -67,21 +63,25 @@ class passdb(object):
             raise passdbException('The addr %s does not exist'% addr)
 
 
-
-def check_wallet(address):
-    if str(address) not in WALLET['accounts'].keys():
-        return None
-    return {'address': address, 'passphrase': WALLET['accounts'][address]}
-
-
 def currency_converter(src, dst, amount):
     conversions = {'eth': {'wei': 10 ** 18}, 'wei': {'eth': 10 ** -18}}
-    return int(amount * conversions[src][dst])
+    return float(amount * conversions[src][dst])
 
 
 def create_passphrase():
     return hashlib.sha256(os.urandom(64)).hexdigest()
-    
+
+
+def discount_fee(src, dst, weis):
+    eth    = ethrpc()
+    resp   = eth.eth_estimateGas(dst, src, weis)
+    if resp['status'] == 'success':
+        tx_amount = weis - resp['result']
+        result = {'amount': tx_amount, 'fee': resp['result']}
+        return {'status':'success', 'result': result}
+    else:
+        return resp
+
 
 app = Flask(__name__)
 try:
@@ -106,30 +106,48 @@ def send_transaction():
         resp   = {'status':'error', 'message':'destination key not found'}
         status = 400
 
-    elif not 'eth' in content:
-        resp   = {'status':'error', 'message':'eth key not found'}
+    if not 'weis' in content:
+        resp   = {'status':'error', 'message':'weis key not found'}
         status = 400
 
-    elif not 'source' in content:
+    if not 'source' in content:
         resp   = {'status':'error', 'message':'source key not found'}
         status = 400
 
-    wallet = check_wallet(content['source'])
-    if wallet is None:
+    if not 'inc_fee' in content:
+        resp   = {'status':'error', 'message':'inc_fee key not found'}
+        status = 400
+
+    try:
+        src = content['source']
+        passphrase = passdb.getPassword(src)
+    except passdbException as error:
+        message = 'Error getting wallet password: %s' % error.value
         resp   = {'status':'error', 'message':'source wallet not registered'}
         status = 400
 
     if status == 400:
-        return Response(response=dumps(resp), status=400)
-
+        return Response(response=dumps(resp), status=status)
 
     dst  = content['destination']
-    weis = currency_converter('eth', 'wei', content['eth'])
+    weis = content['weis']
+    if inc_fee:
+        resp = discount_fee(src, dst, weis)
+        if resp['status'] == 'success':
+            weis = resp['result']['amount']
+            fee  = resp['result']['fee']
+        else:
+            return Response(response=dumps(resp), status=status)
+    else:
+        fee = 0
+
     eth = ethrpc()
-    tx_dict = eth.personal_sendTransaction(wallet['address'], dst, weis, wallet['passphrase'])
+    tx_dict = eth.personal_sendTransaction(src, dst, weis, passphrase)
+
     if tx_dict['status'] == 'success':
         tx   = tx_dict['result']
-        resp = {'status':'success', 'result':{'source': wallet['address'], 'destination': dst, 'transaction': tx}}
+        result = {'source': src, 'destination': dst, 'transaction': tx, 'weis': weis, 'fee': fee}
+        resp = {'status':'success', 'result':result}
         now  = time.time()
         ret  = resp['result']
         ret['timestamp'] = now
@@ -137,6 +155,96 @@ def send_transaction():
         app.logger.info(dumps(ret))
     elif tx_dict['status'] == 'error':
         resp   = tx_dict
+
+    return Response(response=dumps(resp), status=status)
+
+
+@app.route('/tx/send2', methods=["POST"])
+def send_transaction_2():
+    status = 201
+    data = request.data
+    # Verifico valores del JSON
+    try:
+        content = loads(data)
+    except ValueError as e:
+        resp   = {'status':'error', 'message':str(e)}
+        status = 400
+
+    if not 'destination' in content :
+        resp   = {'status':'error', 'message':'destination key not found'}
+        status = 400
+
+    if not 'weis' in content:
+        resp   = {'status':'error', 'message':'weis key not found'}
+        status = 400
+
+    if not 'source' in content:
+        resp   = {'status':'error', 'message':'source key not found'}
+        status = 400
+
+    if not 'inc_fee' in content:
+        resp   = {'status':'error', 'message':'inc_fee key not found'}
+        status = 400
+
+    # Desbloqueo cuenta
+    try:
+        src = content['source']
+        passphrase = passdb.getPassword(src)
+    except passdbException as error:
+        message = 'Error getting wallet password: %s' % error.value
+        resp   = {'status':'error', 'message':'source wallet not registered'}
+        return Response(response=dumps(resp), status=status)
+    eth  = ethrpc()
+    unlock = eth.personal_unlockAccount(src, passphrase)
+    if unlock['status'] == 'success':
+        if not unlock['result']:
+            resp   = {'status':'error', 'message':'account could not be unlocked'}
+            status = 400
+    else:
+        resp   = unlock
+        status = 400
+
+    # Retorno ante algun error
+    if status == 400:
+        return Response(response=dumps(resp), status=status)
+
+    dst  = content['destination']
+    weis = content['weis']
+    if inc_fee:
+        resp = discount_fee(src, dst, weis)
+        if resp['status'] == 'success':
+            weis = resp['result']['amount']
+            fee  = resp['result']['fee']
+        else:
+            return Response(response=dumps(resp), status=status)
+    else:
+        fee = 0
+
+    if 'gas' in content:
+        gas = content['gas']
+    else:
+        gas = None
+
+    if 'gas_price' in content:
+        gas_price = content['gas_price']
+    else:
+        gas_price = None
+
+    eth = ethrpc()
+    tx_dict = eth.eth_sendTransaction(src, dst, weis, gas, gas_price)
+
+    if tx_dict['status'] == 'success':
+        tx   = tx_dict['result']
+        result = {'source': src, 'destination': dst, 'transaction': tx, 'gas': gas, 'gas_price': gas_price, 'weis': weis, 'fee': fee}
+        resp = {'status':'success', 'result':result}
+        now  = time.time()
+        ret  = resp['result']
+        ret['timestamp'] = now
+        ret['date']      = str(datetime.now())
+        app.logger.info(dumps(ret))
+    elif tx_dict['status'] == 'error':
+        resp   = tx_dict
+
     return Response(response=dumps(resp), status=status)
 
 
@@ -195,6 +303,21 @@ def get_tx_confimations(tx):
     return Response(response=dumps(resp), status=status)
 
 
+@app.route('/tx/estimatefee/<string:address>/', methods=["GET"])
+def get_tx_estimate_fee(address):
+    eth          = ethrpc()
+    gas_price    = eth.eth_gasPrice()
+    gas_estimate = eth.eth_estimateGas(address)
+    if gas_price['status'] == 'success' and gas_estimate['status'] == 'success':
+        fee    = gas_price['result'] * gas_estimate['result']
+        resp   = {'status':'success', 'result': fee}
+        status = 200
+    else:
+        resp = {'status':'error', 'message':'error getting transaction information'}
+        status = 503
+    return Response(response=dumps(resp), status=status)
+
+
 @app.route('/account/list/', methods=["GET"])
 def get_accounts():
     eth    = ethrpc()
@@ -221,27 +344,35 @@ def create_account():
     return Response(response=dumps(resp), status=status)
 
 
-
 @app.route('/block/last/', methods=["GET"])
 def get_last_block():
     eth    = ethrpc()
     resp   = eth.eth_blockNumber()
-    print resp
     status = 200
     return Response(response=dumps(resp), status=status)
 
 
-@app.route('/test', methods=["GET"])
-def test():
-    passphrase = create_passphrase()
-    try:
-        passdb.setPassword('0x123423414124afde123123123123', passphrase)
-        status = 200
-    except passdbException as error:
-        message = "create_account(): Error creating file: %s" % error.value
-        resp = {'status': 'error', 'message': message}
-        status = 503
-    resp = {'status':'success', 'result':passphrase}
+@app.route('/gas/price/', methods=["GET"])
+def get_gas_price():
+    eth    = ethrpc()
+    resp   = eth.eth_gasPrice()
+    status = 200
+    return Response(response=dumps(resp), status=status)
+
+
+@app.route('/gas/estimate/<string:address>', methods=["GET"])
+def get_gas_estimate(address):
+    eth    = ethrpc()
+    resp   = eth.eth_estimateGas(address)
+    status = 200
+    return Response(response=dumps(resp), status=status)
+
+
+@app.route('/test/<string:address>', methods=["GET"])
+def test(address):
+    #resp = discount_fee('0x1586da20defcc011356aa934cf35c1031fa90871', '0xf4E1D94C990F470E231Aa38bcc0178C1Ca9A02Ec', 20000000000000000)
+    eth = ethrpc()
+    resp = eth.personal_lockAccount(address)
     status = 200
     return Response(response=dumps(resp), status=status)
 
