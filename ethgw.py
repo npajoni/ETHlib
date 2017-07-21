@@ -11,6 +11,9 @@ import os
 import time
 from datetime import datetime
 import hashlib
+from keys import S3
+from s3 import *
+
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -49,9 +52,19 @@ class passdb(object):
             with open(self.path + addr, 'w') as f:
                 f.write(password)
                 f.close()
-                return True
         except Exception as e:
             raise passdbException(str(e))
+
+        # Upload to S3 Bucket
+        s3 = S3Upload(S3['access_key'], S3['secret_key'])
+        if os.path.isfile(self.path + addr):
+            try:
+                s3.upload(self.path, addr, S3['bucket'], S3['path'])
+                return True
+            except S3UploadException as e:
+                raise passdbException(str(e))
+        else:
+            raise passdbException('File does not exist: %s%s' % (path, addr))
 
  
     def getPassword(self, addr):
@@ -124,8 +137,9 @@ def lock_account(address):
 #########################################################################################
 app = Flask(__name__)
 try:
-    pass_dir = 'passwords'
-    path = app.root_path + '/' + pass_dir
+    #pass_dir = 'passwords'
+    #path = app.root_path + '/' + pass_dir
+    path = '/var/ethgw/passwords'
     passdb = passdb(path)
 except passdbException as error:
     print error.value
