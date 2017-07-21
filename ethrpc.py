@@ -10,7 +10,8 @@ import httplib2
 def decimal_converter(d, values=[]):
     for v in values:
         if v in d:
-            d[v] = int(d[v], 16)
+            if d[v] is not None:
+                d[v] = int(d[v], 16)
     return d
 
 
@@ -130,6 +131,7 @@ class ethrpc(object):
             Returns the information about a transaction requested by transaction hash.
         '''
         rpc_ret = self.jsonrpc('eth_getTransactionByHash', [tx_hash])
+        print rpc_ret
         if rpc_ret['status'] == 'success':
             values = ['nonce', 'v', 'gas', 'value', 'blockNumber', 'gasPrice', 'transactionIndex']
             rpc_ret['result'] = decimal_converter(rpc_ret['result'], values)
@@ -199,7 +201,9 @@ class ethrpc(object):
             tx['data'] = hex(data)
         params = [tx]
         print params
-        return self.jsonrpc('eth_sendTransaction', params, 1)
+        ret = self.jsonrpc('eth_sendTransaction', params, 1)
+        print "ret: %s" % ret
+        return ret
 
 
 
