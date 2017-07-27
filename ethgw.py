@@ -8,6 +8,7 @@ from flask import jsonify
 from flask import Response
 
 import os
+import socket
 import time
 from datetime import datetime
 import hashlib
@@ -56,29 +57,35 @@ class passdb(object):
             raise passdbException(str(e))
 
         # Upload to S3 Bucket
-        s3 = S3Upload(S3['access_key'], S3['secret_key'])
+        s3 = AwsS3(S3['access_key'], S3['secret_key'])
         if os.path.isfile(self.path + addr):
             try:
                 s3.upload(self.path, addr, S3['bucket'], S3['path'])
                 return True
-            except S3UploadException as e:
+            except AwsS3Exception as e:
                 raise passdbException(str(e))
         else:
             raise passdbException('File does not exist: %s%s' % (path, addr))
 
- 
+
     def getPassword(self, addr):
-        if os.path.isfile(self.path+addr):
+        if not os.path.isfile(self.path+addr):
+            s3 = AwsS3(S3['access_key'], S3['secret_key'])
             try:
-                password = None
-                with open(self.path + addr, 'r') as f:
-                    password = f.read()
-                    f.close()
-                    return password
-            except Exception as e:
-                raise passdbException(str(e))
-        else:
-            raise passdbException('The addr %s does not exist'% addr)
+                s3path = S3['path'] + addr
+                print "downloading key %s" % addr
+                s3.download(S3['bucket'], s3path, self.path, addr)
+            except AwsS3Exception as error:
+                raise passdbException('The addr %s does not exist and could not be downloaded from S3'% addr)
+
+        try:
+            password = None
+            with open(self.path + addr, 'r') as f:
+                password = f.read()
+                f.close()
+                return password
+        except Exception as e:
+            raise passdbException(str(e))
 
 
 def create_passphrase():
@@ -151,7 +158,27 @@ eth = ethrpc()
 #########################################################################################
 #                              Funciones y URLs de Flask                                #
 #########################################################################################
+# Devuelve True si el nodo esta escuchando por conecciones de la red
+@app.route('/net/listening', methods=["GET"])
+@app.route('/net/listening/', methods=["GET"])
+def net_listening():
+    resp   = eth.net_listening()
+    status = 200
+    return Response(response=dumps(resp), status=status)
 
+# Devuelve la cantindad de peers conectados al node
+@app.route('/net/peercount', methods=["GET"])
+@app.route('/net/peercount/', methods=["GET"])
+def net_peer_count():
+    try:
+        resp   = eth.net_peerCount()
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        print resp
+    return Response(response=dumps(resp), status=status)
 
 # Envia transaccion al nodo utilizando el metodo eth y devuelve la TX si es exitosa
 @app.route('/tx/send', methods=["POST"])
@@ -180,8 +207,6 @@ def send_transaction():
         if param not in content:
             content[param] = None
 
-    print "Argumentos recibidos"
-    print content
     # Desbloqueo cuenta
     resp = unlock_account(content['source'])
     if resp['status'] == 'error':
@@ -204,20 +229,21 @@ def send_transaction():
     else:
         fee = 0
 
-    print "FEE"
-    print fee
     # Envio transaccion al nodo
-    print "Arguementos enviados"
-    print content
-    tx = eth.eth_sendTransaction(content['source'], content['destination'], content['weis'],
-                                 content['gas'], content['gas_price'])
+    try:
+        resp = eth.eth_sendTransaction(content['source'], content['destination'], content['weis'],
+                                       content['gas'], content['gas_price'])
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
 
     # Bloqueo la cuenta
     lock_account(content['source'])
 
-    if tx['status'] == 'success':
+    if resp['status'] == 'success':
         result = {'source': content['source'], 'destination': content['destination'], 
-                  'transaction': tx['result'], 'gas': content['gas'], 'gas_price': content['gas_price'],
+                  'transaction': resp['result'], 'gas': content['gas'], 'gas_price': content['gas_price'],
                   'weis': content['weis'], 'fee': fee}
 
         resp = {'status':'success', 'result':result}
@@ -226,19 +252,22 @@ def send_transaction():
         ret['timestamp'] = now
         ret['date']      = str(datetime.now())
         app.logger.info(dumps(ret))
-    else:
-        resp   = tx
-    print "Luego de transaccion"
-    print resp
-    return Response(response=dumps(resp), status=201)
+        status = 201
+
+    return Response(response=dumps(resp), status=status)
 
 
 # Devuelve el balance de la wallet pasada como argumento
 @app.route('/wallet/balance/<string:address>', methods=["GET"])
 @app.route('/wallet/balance/<string:address>/', methods=["GET"])
 def get_balance(address):
-    resp   = eth.eth_getBalance(address)
-    status = 200
+    try:
+        resp   = eth.eth_getBalance(address)
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -246,8 +275,13 @@ def get_balance(address):
 @app.route('/tx/hash/<string:tx>', methods=["GET"])
 @app.route('/tx/hash/<string:tx>/', methods=["GET"])
 def get_tx_info(tx):
-    resp   = eth.eth_getTransactionByHash(tx)
-    status = 200
+    try:
+        resp   = eth.eth_getTransactionByHash(tx)
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -255,8 +289,13 @@ def get_tx_info(tx):
 @app.route('/tx/receipt/<string:tx>', methods=["GET"])
 @app.route('/tx/receipt/<string:tx>/', methods=["GET"])
 def get_tx_receipt(tx):
-    resp   = eth.eth_getTransactionReceipt(tx)
-    status = 200
+    try:
+        resp   = eth.eth_getTransactionReceipt(tx)
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -264,14 +303,19 @@ def get_tx_receipt(tx):
 @app.route('/tx/fee/<string:tx>', methods=["GET"])
 @app.route('/tx/fee/<string:tx>/', methods=["GET"])
 def get_tx_fee(tx):
-    tx_info = eth.eth_getTransactionByHash(tx)
-    tx_receipt = eth.eth_getTransactionReceipt(tx)
-    if tx_info['status'] == 'success' and tx_receipt['status'] == 'success':
-        fee    = tx_info['result']['gasPrice'] * tx_receipt['result']['gasUsed']
-        resp   = {'status':'success', 'result': fee}
-        status = 200
-    else:
-        resp = {'status':'error', 'message':'error getting transaction information'}
+    try:
+        tx_info    = eth.eth_getTransactionByHash(tx)
+        tx_receipt = eth.eth_getTransactionReceipt(tx)
+        if tx_info['status'] == 'success' and tx_receipt['status'] == 'success':
+            fee    = tx_info['result']['gasPrice'] * tx_receipt['result']['gasUsed']
+            resp   = {'status':'success', 'result': fee}
+            status = 200
+        else:
+            resp = {'status':'error', 'message':'error getting transaction information'}
+            status = 503
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
         status = 503
     return Response(response=dumps(resp), status=status)
 
@@ -280,7 +324,14 @@ def get_tx_fee(tx):
 @app.route('/tx/confirmations/<string:tx>', methods=["GET"])
 @app.route('/tx/confirmations/<string:tx>/', methods=["GET"])
 def get_tx_confimations(tx):
-    tx_info    = eth.eth_getTransactionByHash(tx)
+    try:
+        tx_info    = eth.eth_getTransactionByHash(tx)
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        return Response(response=dumps(resp), status=status)
+
     if tx_info['status'] == 'success':
         if  tx_info['result']['blockNumber'] is None:
             confirmations = 0
@@ -295,6 +346,10 @@ def get_tx_confimations(tx):
             else:
                 resp = {'status':'error', 'message':'error getting transaction information'}
                 status = 503
+    else:
+        resp   = tx_info
+        status = 503
+
     return Response(response=dumps(resp), status=status)
 
 
@@ -327,14 +382,27 @@ def get_tx_estimate_fee():
             content[param] = None
 
     if 'gas_price'not  in content:
-        resp = eth.eth_gasPrice()
-        if resp['status'] == 'success':
-            content['gas_price'] = resp['result']
-        else:
-            return Response(response=dumps(resp), status=503)
+        try:
+            resp = eth.eth_gasPrice()
+            if resp['status'] == 'success':
+                content['gas_price'] = resp['result']
+            else:
+                return Response(response=dumps(resp), status=503)
+        except socket.error as error:
+            msg    = "ethrpc(): %s" % str(error)
+            resp   = {'status':'error', 'message':msg}
+            status = 503
+            return Response(response=dumps(resp), status=status)
 
     # Devuelvo la cantidad de gas a utilizar estimada
-    gas_estimate = eth.eth_estimateGas(content['destination'], content['source'], content['weis'])
+    try:
+        gas_estimate = eth.eth_estimateGas(content['destination'], content['source'], content['weis'])
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+    return Response(response=dumps(resp), status=status)
+
     if gas_estimate['status'] == 'success':
         fee    = content['gas_price'] * gas_estimate['result']
         resp   = {'status':'success', 'result': fee}
@@ -350,8 +418,13 @@ def get_tx_estimate_fee():
 @app.route('/account/list', methods=["GET"])
 @app.route('/account/list/', methods=["GET"])
 def get_accounts():
-    resp   = eth.personal_listAccounts()
-    status = 200
+    try:
+        resp   = eth.personal_listAccounts()
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -360,7 +433,13 @@ def get_accounts():
 @app.route('/account/create/', methods=["GET"])
 def create_account():
     passphrase = create_passphrase()
-    resp   = eth.personal_newAccount(passphrase)
+    try:
+        resp   = eth.personal_newAccount(passphrase)
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+
     if resp['status'] == 'success':
         # Crear archivo en formato: Filename = resp['result'] - Contenido: passphrase
         try:
@@ -370,7 +449,6 @@ def create_account():
             message = "create_account(): Error creating file: %s" % error.value
             resp = {'status': 'error', 'message': message}
             status = 503
-    print resp
     return Response(response=dumps(resp), status=status)
 
 
@@ -378,8 +456,13 @@ def create_account():
 @app.route('/block/last', methods=["GET"])
 @app.route('/block/last/', methods=["GET"])
 def get_last_block():
-    resp   = eth.eth_blockNumber()
-    status = 200
+    try:
+        resp   = eth.eth_blockNumber()
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -387,8 +470,13 @@ def get_last_block():
 @app.route('/gas/price', methods=["GET"])
 @app.route('/gas/price/', methods=["GET"])
 def get_gas_price():
-    resp   = eth.eth_gasPrice()
-    status = 200
+    try:
+        resp   = eth.eth_gasPrice()
+        status = 200
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
     return Response(response=dumps(resp), status=status)
 
 
@@ -420,9 +508,15 @@ def get_tx_estimate():
         if param not in content:
             content[param] = None
 
-    resp   = eth.eth_estimateGas(content['destination'], content['source'], content['weis'])
+    try:
+        resp   = eth.eth_estimateGas(content['destination'], content['source'], content['weis'])
+        status = 201
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
 
-    return Response(response=dumps(resp), status=201)
+    return Response(response=dumps(resp), status=status)
 
 
 @app.route('/test/<string:address>', methods=["GET"])

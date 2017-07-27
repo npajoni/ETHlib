@@ -70,6 +70,23 @@ class ethrpc(object):
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # Ethereum CLI Interface
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def net_listening(self):
+        '''
+            Returns true if client is actively listening for network connections.
+        '''
+        return self.jsonrpc('net_listening', [], 67)
+
+
+    def net_peerCount(self):
+        '''
+            Returns number of peers currently connected to the client.
+        '''
+        rpc_ret = self.jsonrpc('net_peerCount', [], 67)
+        if rpc_ret['status'] == 'success':
+            rpc_ret = decimal_converter(rpc_ret, ['result'])
+        return rpc_ret
+
+
     def eth_getBalance(self, address, state='latest'):
         '''
             The eth_getBalance RPC returns the balance of given address.
