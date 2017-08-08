@@ -1,4 +1,4 @@
-from ethrpc import *
+from lib.ethrpc import *
 from json import loads
 from json import dumps
 
@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 import hashlib
 from keys import S3
-from s3 import *
+from lib.s3 import *
 
 
 import logging
@@ -142,10 +142,10 @@ def lock_account(address):
 #########################################################################################
 #                               Inicializacion de Variables                             #
 #########################################################################################
-app = Flask(__name__)
+ethgw = Flask(__name__)
 try:
     #pass_dir = 'passwords'
-    #path = app.root_path + '/' + pass_dir
+    #path = ethgw.root_path + '/' + pass_dir
     path = '/var/ethgw/passwords'
     passdb = passdb(path)
 except passdbException as error:
@@ -159,16 +159,16 @@ eth = ethrpc()
 #                              Funciones y URLs de Flask                                #
 #########################################################################################
 # Devuelve True si el nodo esta escuchando por conecciones de la red
-@app.route('/net/listening', methods=["GET"])
-@app.route('/net/listening/', methods=["GET"])
+@ethgw.route('/net/listening/', methods=["GET"])
+@ethgw.route('/net/listening', methods=["GET"])
 def net_listening():
     resp   = eth.net_listening()
     status = 200
     return Response(response=dumps(resp), status=status)
 
 # Devuelve la cantindad de peers conectados al node
-@app.route('/net/peercount', methods=["GET"])
-@app.route('/net/peercount/', methods=["GET"])
+@ethgw.route('/net/peercount/', methods=["GET"])
+@ethgw.route('/net/peercount', methods=["GET"])
 def net_peer_count():
     try:
         resp   = eth.net_peerCount()
@@ -181,8 +181,8 @@ def net_peer_count():
     return Response(response=dumps(resp), status=status)
 
 # Envia transaccion al nodo utilizando el metodo eth y devuelve la TX si es exitosa
-@app.route('/tx/send', methods=["POST"])
-@app.route('/tx/send/', methods=["POST"])
+@ethgw.route('/tx/send/', methods=["POST"])
+@ethgw.route('/tx/send', methods=["POST"])
 def send_transaction():
     # Parametros madatorios
     mdt_params = ['destination', 'weis', 'source', 'inc_fee']
@@ -251,15 +251,15 @@ def send_transaction():
         ret  = resp['result']
         ret['timestamp'] = now
         ret['date']      = str(datetime.now())
-        app.logger.info(dumps(ret))
+        ethgw.logger.info(dumps(ret))
         status = 201
 
     return Response(response=dumps(resp), status=status)
 
 
 # Devuelve el balance de la wallet pasada como argumento
-@app.route('/wallet/balance/<string:address>', methods=["GET"])
-@app.route('/wallet/balance/<string:address>/', methods=["GET"])
+@ethgw.route('/wallet/balance/<string:address>/', methods=["GET"])
+@ethgw.route('/wallet/balance/<string:address>', methods=["GET"])
 def get_balance(address):
     try:
         resp   = eth.eth_getBalance(address)
@@ -272,8 +272,8 @@ def get_balance(address):
 
 
 # Devuelve data de la tx pasada como argumento
-@app.route('/tx/hash/<string:tx>', methods=["GET"])
-@app.route('/tx/hash/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/hash/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/hash/<string:tx>', methods=["GET"])
 def get_tx_info(tx):
     try:
         resp   = eth.eth_getTransactionByHash(tx)
@@ -286,8 +286,8 @@ def get_tx_info(tx):
 
 
 # Devuelve data de la tx pasada como argumento
-@app.route('/tx/receipt/<string:tx>', methods=["GET"])
-@app.route('/tx/receipt/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/receipt/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/receipt/<string:tx>', methods=["GET"])
 def get_tx_receipt(tx):
     try:
         resp   = eth.eth_getTransactionReceipt(tx)
@@ -300,8 +300,8 @@ def get_tx_receipt(tx):
 
 
 # Devuelve el fee de la tx pasada como argumento
-@app.route('/tx/fee/<string:tx>', methods=["GET"])
-@app.route('/tx/fee/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/fee/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/fee/<string:tx>', methods=["GET"])
 def get_tx_fee(tx):
     try:
         tx_info    = eth.eth_getTransactionByHash(tx)
@@ -321,8 +321,8 @@ def get_tx_fee(tx):
 
 
 # Devuelve la cantidad de confirmaciones de la tx pasada como argumento
-@app.route('/tx/confirmations/<string:tx>', methods=["GET"])
-@app.route('/tx/confirmations/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/confirmations/<string:tx>/', methods=["GET"])
+@ethgw.route('/tx/confirmations/<string:tx>', methods=["GET"])
 def get_tx_confimations(tx):
     try:
         tx_info    = eth.eth_getTransactionByHash(tx)
@@ -354,8 +354,8 @@ def get_tx_confimations(tx):
 
 
 # Devuelve el fee estimado de la transaccion generada con los datos del json
-@app.route('/tx/estimatefee', methods=["POST"])
-@app.route('/tx/estimatefee/', methods=["POST"])
+@ethgw.route('/tx/estimatefee/', methods=["POST"])
+@ethgw.route('/tx/estimatefee', methods=["POST"])
 def get_tx_estimate_fee():
     # Parametros madatorios
     mdt_params = ['destination']
@@ -415,8 +415,8 @@ def get_tx_estimate_fee():
 
 
 # Devuelve el listado de cuentas disponibles en el nodo
-@app.route('/account/list', methods=["GET"])
-@app.route('/account/list/', methods=["GET"])
+@ethgw.route('/account/list/', methods=["GET"])
+@ethgw.route('/account/list', methods=["GET"])
 def get_accounts():
     try:
         resp   = eth.personal_listAccounts()
@@ -429,8 +429,8 @@ def get_accounts():
 
 
 # Crea una cuenta en el nodo y devuelve su address
-@app.route('/account/create', methods=["GET"])
-@app.route('/account/create/', methods=["GET"])
+@ethgw.route('/account/create/', methods=["GET"])
+@ethgw.route('/account/create', methods=["GET"])
 def create_account():
     passphrase = create_passphrase()
     try:
@@ -453,8 +453,8 @@ def create_account():
 
 
 # Devuelve el numero del ultimo bloque
-@app.route('/block/last', methods=["GET"])
-@app.route('/block/last/', methods=["GET"])
+@ethgw.route('/block/last/', methods=["GET"])
+@ethgw.route('/block/last', methods=["GET"])
 def get_last_block():
     try:
         resp   = eth.eth_blockNumber()
@@ -467,8 +467,8 @@ def get_last_block():
 
 
 # Devuelve el precio del gas de la red
-@app.route('/gas/price', methods=["GET"])
-@app.route('/gas/price/', methods=["GET"])
+@ethgw.route('/gas/price/', methods=["GET"])
+@ethgw.route('/gas/price', methods=["GET"])
 def get_gas_price():
     try:
         resp   = eth.eth_gasPrice()
@@ -481,8 +481,8 @@ def get_gas_price():
 
 
 # Devuelve el gas estimado a utilizar en la transaccion
-@app.route('/tx/estimategas', methods=["POST"])
-@app.route('/tx/estimategas/', methods=["POST"])
+@ethgw.route('/tx/estimategas/', methods=["POST"])
+@ethgw.route('/tx/estimategas', methods=["POST"])
 def get_tx_estimate():
     # Parametros madatorios
     mdt_params = ['destination']
@@ -519,7 +519,7 @@ def get_tx_estimate():
     return Response(response=dumps(resp), status=status)
 
 
-@app.route('/test/<string:address>', methods=["GET"])
+@ethgw.route('/test/<string:address>', methods=["GET"])
 def test(address):
     #resp = discount_fee('0x1586da20defcc011356aa934cf35c1031fa90871', '0xf4E1D94C990F470E231Aa38bcc0178C1Ca9A02Ec', 20000000000000000)
     eth = ethrpc()
@@ -532,5 +532,5 @@ def test(address):
 if __name__ == '__main__':
     handler = RotatingFileHandler('log/tx.log', maxBytes=10000, backupCount=1)
     handler.setLevel(logging.INFO)
-    app.logger.addHandler(handler)
-    app.run(debug=True, host='0.0.0.0', port=6969)
+    ethgw.logger.addHandler(handler)
+    ethgw.run(debug=True, host='0.0.0.0', port=6969)
