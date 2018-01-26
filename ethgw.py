@@ -105,6 +105,9 @@ def discount_fee(src, dst, weis, gas_price=None):
         else:
             return resp
     fee = int(gas_used['result']) * int(gas_price)
+    if fee >= weis:
+        message = "Fee value is greater or equal than weis to transfer. Fee: %d - Weis: %d" % (fee, weis)
+        return {'status':'error', 'message': message}
     # Calculo el monto a transferir sin el fee
     tx_amount = weis - fee
     result = {'weis': tx_amount, 'fee': fee, 'gas':gas_used['result'], 'gas_price':gas_price}
@@ -194,6 +197,9 @@ def send_transaction():
     except ValueError as e:
         resp   = {'status':'error', 'message':str(e)}
         return Response(response=dumps(resp), status=400)
+    except Exception as e:
+        resp   = {'status':'error', 'message':str(e)}
+        return Response(response=dumps(resp), status=400)
 
     # Verifico parametros mandatorios
     for param in mdt_params:
@@ -222,10 +228,8 @@ def send_transaction():
                 content['gas'] = resp['result']['gas']
             if content['gas_price'] is None:
                 content['gas_price'] = resp['result']['gas_price']
-            
-
         else:
-            return Response(response=dumps(resp), status=503)
+            return Response(response=dumps(resp), status=400)
     else:
         fee = 0
 
@@ -237,6 +241,12 @@ def send_transaction():
         msg    = "ethrpc(): %s" % str(error)
         resp   = {'status':'error', 'message':msg}
         status = 503
+        return Response(response=dumps(resp), status=status)
+    except Exception as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        return Response(response=dumps(resp), status=status)
 
     # Bloqueo la cuenta
     lock_account(content['source'])
@@ -253,6 +263,8 @@ def send_transaction():
         ret['date']      = str(datetime.now())
         ethgw.logger.info(dumps(ret))
         status = 201
+    else:
+        status = 400
 
     return Response(response=dumps(resp), status=status)
 

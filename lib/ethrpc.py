@@ -53,6 +53,7 @@ class ethrpc(object):
         if body is not {}:
             response, content = self.doPost(self.get_url(),body)
             if response['status'] == '200':
+                print content
                 resp = loads(content)
                 if 'error' in resp:
                     message = resp['error']['message']
@@ -60,7 +61,10 @@ class ethrpc(object):
                     return ret
                 else:
                     result = resp['result']
-                    ret = {'status': 'success', 'result': result}
+                    if result is None:
+                        ret = {'status': 'error', 'message': "eth node returns null"}
+                    else:
+                        ret = {'status': 'success', 'result': result}
                     return ret
         else:
             ret = {'status': 'error', 'message': "response is not 200"}
@@ -151,6 +155,7 @@ class ethrpc(object):
         print rpc_ret
         if rpc_ret['status'] == 'success':
             values = ['nonce', 'v', 'gas', 'value', 'blockNumber', 'gasPrice', 'transactionIndex']
+            print rpc_ret['result']
             rpc_ret['result'] = decimal_converter(rpc_ret['result'], values)
         return rpc_ret
 
