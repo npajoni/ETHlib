@@ -52,6 +52,7 @@ class ethrpc(object):
         if body is not {}:
             response, content = self.doPost(self.get_url(),body)
             if response['status'] == '200':
+                print content
                 resp = loads(content)
                 if 'error' in resp:
                     message = resp['error']['message']
@@ -151,6 +152,7 @@ class ethrpc(object):
         rpc_ret = self.jsonrpc('eth_getTransactionByHash', [tx_hash])
         if rpc_ret['status'] == 'success':
             values = ['nonce', 'v', 'gas', 'value', 'blockNumber', 'gasPrice', 'transactionIndex']
+            print rpc_ret['result']
             rpc_ret['result'] = decimal_converter(rpc_ret['result'], values)
         return rpc_ret
 
