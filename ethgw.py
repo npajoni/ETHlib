@@ -19,6 +19,8 @@ from lib.s3 import *
 import logging
 from logging.handlers import RotatingFileHandler
 
+from ethereum import transactions
+import rlp
 
 #########################################################################################
 #           Clase y funciones para generacion y obetencion de passphrases               #
@@ -31,6 +33,40 @@ class passdbException(Exception):
 
     def __repr__(self):
         return repr(self.value)
+
+
+class addrDBException(Exception):
+    def __init__(self, value):
+        self.value = value
+
+    def __repr__(self):
+        return repr(self.value)
+
+
+class addrDB(object):
+    def __init__(self, path=None):
+	if path is not None:
+	    if os.path.isdir(path):
+		self.path = path
+		if not self.path.endswith('/'):
+		    self.path = self.path + '/'
+	    else:
+		raise addrDBException('The path %s does not exist' % path)
+	else:
+            raise addrDBException('The path can not be None')
+
+    def getAddrPK(self, addr):
+	if not os.path.isfile(self.path+addr):
+	    raise addrDBException('The addr %s does not exist'% addr)
+	try:
+            pk = None
+            with open(self.path + addr, 'r') as f:
+                pk = f.read()
+                f.close()
+                return pk
+        except Exception as e:
+            raise addrDBException(str(e))
+
 
 
 class passdb(object):
@@ -49,6 +85,7 @@ class passdb(object):
     def setPassword(self, addr, password):
         if os.path.isfile(self.path + addr):
             raise passdbException('The addr: %s already exist' % addr)
+
         try:
             with open(self.path + addr, 'w') as f:
                 f.write(password)
@@ -73,7 +110,6 @@ class passdb(object):
             s3 = AwsS3(S3['access_key'], S3['secret_key'])
             try:
                 s3path = S3['path'] + addr
-                print "downloading key %s" % addr
                 s3.download(S3['bucket'], s3path, self.path, addr)
             except AwsS3Exception as error:
                 raise passdbException('The addr %s does not exist and could not be downloaded from S3'% addr)
@@ -87,12 +123,24 @@ class passdb(object):
         except Exception as e:
             raise passdbException(str(e))
 
+"""
+class tx(object):
+    def __init__(self, src, dst, value, gas=None, gasPrice=None, nonce=None, data=None):
+	self.src      = src
+	self.dst      = dst
+	self.value    = value
+	self.gas      = gas
+	self.gasprice = gasPrice
+	self.nonce    = nonce
+	self.data     = data
+"""
+
 
 def create_passphrase():
     return hashlib.sha256(os.urandom(64)).hexdigest()
 
 
-def discount_fee(src, dst, weis, gas_price=None):
+def calculate_fee(discount, src, dst, weis, gas_price=None):
     # Obtengo el gas usado estimado para la transaccion
     gas_used = eth.eth_estimateGas(dst, src, weis)
     if gas_used['status'] != 'success':
@@ -104,9 +152,16 @@ def discount_fee(src, dst, weis, gas_price=None):
             gas_price = resp['result']
         else:
             return resp
-    fee = int(gas_used['result']) * int(gas_price)
-    # Calculo el monto a transferir sin el fee
-    tx_amount = weis - fee
+    if discount:
+        fee = int(gas_used['result']) * int(gas_price)
+        if fee >= weis:
+            message = "Fee value is greater or equal than weis to transfer. Fee: %d - Weis: %d" % (fee, weis)
+            return {'status':'error', 'message': message}
+        # Calculo el monto a transferir sin el fee
+        tx_amount = weis - fee
+    else:
+        fee = 0
+        tx_amount = weis
     result = {'weis': tx_amount, 'fee': fee, 'gas':gas_used['result'], 'gas_price':gas_price}
     return {'status':'success', 'result': result}
 
@@ -138,6 +193,21 @@ def lock_account(address):
 
     return resp
 
+# Devuelve el numero de transaction actual para la addr indicada.
+def get_transaction_count(address):
+    resp = eth.eth_getTransactionCount(address)
+    if resp['status'] == 'success':
+        if not resp['result']:
+            resp   = {'status':'error', 'message':'account could not be unlocked'}
+
+    return resp
+
+
+# Recibe la TX y la devuelve firmada.
+def sign_tx(tx, pk, nid):
+    #t = tx.Transaction(tx.nonce, tx.gasprice, tx.startgas, int(tx.to,0),tx.value,bytearray.fromhex(tx.data.replace("0x", "")))
+    return "0x" + rlp.encode(tx.sign(int(pk,0),nid)).encode('hex')
+
 
 #########################################################################################
 #                               Inicializacion de Variables                             #
@@ -146,9 +216,15 @@ ethgw = Flask(__name__)
 try:
     #pass_dir = 'passwords'
     #path = ethgw.root_path + '/' + pass_dir
-    path = '/var/ethgw/passwords'
+    path   = '/var/ethgw/passwords'
     passdb = passdb(path)
 except passdbException as error:
+    print error.value
+    exit()
+try:
+    path   = '/var/ethgw/addrdb'
+    addrdb = addrDB(path)
+except addrDBException as error:
     print error.value
     exit()
 
@@ -177,7 +253,6 @@ def net_peer_count():
         msg    = "ethrpc(): %s" % str(error)
         resp   = {'status':'error', 'message':msg}
         status = 503
-        print resp
     return Response(response=dumps(resp), status=status)
 
 # Envia transaccion al nodo utilizando el metodo eth y devuelve la TX si es exitosa
@@ -192,6 +267,9 @@ def send_transaction():
     try:
         content = loads(request.data)
     except ValueError as e:
+        resp   = {'status':'error', 'message':str(e)}
+        return Response(response=dumps(resp), status=400)
+    except Exception as e:
         resp   = {'status':'error', 'message':str(e)}
         return Response(response=dumps(resp), status=400)
 
@@ -213,21 +291,16 @@ def send_transaction():
         return Response(response=dumps(resp), status=503)
 
     # Si el monto incluye fee, se lo descuento antes de transferir
-    if content['inc_fee']:
-        resp = discount_fee(content['source'], content['destination'], content['weis'], content['gas_price'])
-        if resp['status'] == 'success':
-            content['weis']      = resp['result']['weis']
-            fee                  = resp['result']['fee']
-            if content['gas'] is None:
-                content['gas'] = resp['result']['gas']
-            if content['gas_price'] is None:
-                content['gas_price'] = resp['result']['gas_price']
-            
-
-        else:
-            return Response(response=dumps(resp), status=503)
+    resp = calculate_fee(content['inc_fee'], content['source'], content['destination'], content['weis'], content['gas_price'])
+    if resp['status'] == 'success':
+        content['weis']      = resp['result']['weis']
+        fee                  = resp['result']['fee']
+        if content['gas'] is None:
+            content['gas'] = resp['result']['gas']
+        if content['gas_price'] is None:
+            content['gas_price'] = resp['result']['gas_price']
     else:
-        fee = 0
+        return Response(response=dumps(resp), status=400)
 
     # Envio transaccion al nodo
     try:
@@ -237,6 +310,12 @@ def send_transaction():
         msg    = "ethrpc(): %s" % str(error)
         resp   = {'status':'error', 'message':msg}
         status = 503
+        return Response(response=dumps(resp), status=status)
+    except Exception as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        return Response(response=dumps(resp), status=status)
 
     # Bloqueo la cuenta
     lock_account(content['source'])
@@ -253,6 +332,106 @@ def send_transaction():
         ret['date']      = str(datetime.now())
         ethgw.logger.info(dumps(ret))
         status = 201
+    else:
+        status = 400
+
+    return Response(response=dumps(resp), status=status)
+
+
+# Envia transaccion RAW y devuelve la TX si es exitosa
+@ethgw.route('/tx/send_raw/', methods=["POST"])
+@ethgw.route('/tx/send_raw', methods=["POST"])
+def send_raw_transaction():
+    # Parametros madatorios
+    mdt_params = ['destination', 'weis', 'source', 'inc_fee']
+    # Parametros opcionales
+    opt_params = ['gas', 'gas_price']
+    # Cargo el contenido del POST
+    try:
+        content = loads(request.data)
+    except ValueError as e:
+        resp   = {'status':'error', 'message':str(e)}
+        return Response(response=dumps(resp), status=400)
+    except Exception as e:
+        resp   = {'status':'error', 'message':str(e)}
+        return Response(response=dumps(resp), status=400)
+    
+    # Verifico parametros mandatorios
+    for param in mdt_params:
+        if not param in content :
+            msg    = "%s key not found" % param 
+            resp   = {'status':'error', 'message':' msg'}
+            return Response(response=dumps(resp), status=400)
+
+    # Cargo parametros opcionales o asigno None si no fueron definidos
+    for param in opt_params:
+        if param not in content:
+            content[param] = None
+
+    # Obtengo el private key de la cuenta especificada
+    try:
+        pk = addrdb.getAddrPK(content['source'])
+    except addrDBException as error:
+        message = 'Error getting wallet private key: %s' % error.value
+        resp   = {'status':'error', 'message': message}
+        return Response(response=dumps(resp), status=500)
+
+    # Si el monto incluye fee, se lo descuento antes de transferir
+    resp = calculate_fee(content['inc_fee'], content['source'], content['destination'], content['weis'], content['gas_price'])
+    if resp['status'] == 'success':
+        content['weis']      = resp['result']['weis']
+        fee                  = resp['result']['fee']
+        if content['gas'] is None:
+            content['gas'] = resp['result']['gas']
+        if content['gas_price'] is None:
+            content['gas_price'] = resp['result']['gas_price']
+    else:
+        return Response(response=dumps(resp), status=400)
+
+    # Obtengo el nonce actual
+    resp = get_transaction_count(content['source'])
+    if resp['status'] == 'error':
+        return Response(response=dumps(resp), status=503)
+    nonce = resp['result']
+    #print nonce
+
+    # Genero la transaccion
+    #tx = transactions.Transaction(nonce, content['gas_price'], content['gas'], int(content['destination'],0), content['weis'],bytearray.fromhex("00"))
+    print content['gas_price']
+    tx = transactions.Transaction(nonce, content['gas_price'], content['gas'], int(content['destination'],0), content['weis'], '')
+    #print tx.to_dict()
+    sign = sign_tx(tx, pk, 3)
+    #print sign
+    #print pk
+
+    # Envio transaccion al nodo
+    try:
+        resp = eth.eth_sendRawTransaction(sign)
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        return Response(response=dumps(resp), status=status)
+    except Exception as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+        return Response(response=dumps(resp), status=status)
+
+    if resp['status'] == 'success':
+        result = {'source': content['source'], 'destination': content['destination'], 
+                  'transaction': resp['result'], 'gas': content['gas'], 'gas_price': content['gas_price'],
+                  'weis': content['weis'], 'fee': fee}
+
+        resp = {'status':'success', 'result':result}
+        now  = time.time()
+        ret  = resp['result']
+        ret['timestamp'] = now
+        ret['date']      = str(datetime.now())
+        ethgw.logger.info(dumps(ret))
+        status = 201
+    else:
+        status = 400
 
     return Response(response=dumps(resp), status=status)
 
@@ -313,6 +492,20 @@ def get_tx_fee(tx):
         else:
             resp = {'status':'error', 'message':'error getting transaction information'}
             status = 503
+    except socket.error as error:
+        msg    = "ethrpc(): %s" % str(error)
+        resp   = {'status':'error', 'message':msg}
+        status = 503
+    return Response(response=dumps(resp), status=status)
+
+
+# Devuelve la cantidad de transacciones creadas por la address especificada
+@ethgw.route('/tx/count/<string:address>/', methods=["GET"])
+@ethgw.route('/tx/count/<string:address>', methods=["GET"])
+def get_tx_count(address):
+    try:
+        resp   = eth.eth_getTransactionCount(address)
+        status = 200
     except socket.error as error:
         msg    = "ethrpc(): %s" % str(error)
         resp   = {'status':'error', 'message':msg}

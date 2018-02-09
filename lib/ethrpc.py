@@ -17,19 +17,18 @@ def decimal_converter(d, values=[]):
 
 
 class ethrpc(object):
-    def __init__(self, hostname='127.0.0.1',port='8545',ver='2.0'):
+    def __init__(self, hostname='ropsten.infura.io/zoadZNpJfhemeWIDs93V',port='443',ver='2.0'):
         self.http = httplib2.Http()
         self.hostname  = hostname
         self.port      = port
-        self.header    = {'Content-Type': 'text/plain'}
+        self.header    = {'Content-Type': 'application/json'}
         self.version   = ver
-
 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # Support Functions to JSON RPC PROTOCOL
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ 
     def get_url(self):
-        return 'http://%s:%s' % (self.hostname,self.port)
+        return 'https://%s:%s' % (self.hostname,self.port)
 
 
     def doPost(self, url, body):
@@ -60,7 +59,10 @@ class ethrpc(object):
                     return ret
                 else:
                     result = resp['result']
-                    ret = {'status': 'success', 'result': result}
+                    if result is None:
+                        ret = {'status': 'error', 'message': "eth node returns null"}
+                    else:
+                        ret = {'status': 'success', 'result': result}
                     return ret
         else:
             ret = {'status': 'error', 'message': "response is not 200"}
@@ -105,7 +107,6 @@ class ethrpc(object):
         weis_hex = hex(weis)
         tx = {'from': src, 'to': dst, 'value': weis_hex}
         params = [tx, passphrase]
-        print params
         return self.jsonrpc('personal_sendTransaction', params, 1)
 
 
@@ -148,7 +149,6 @@ class ethrpc(object):
             Returns the information about a transaction requested by transaction hash.
         '''
         rpc_ret = self.jsonrpc('eth_getTransactionByHash', [tx_hash])
-        print rpc_ret
         if rpc_ret['status'] == 'success':
             values = ['nonce', 'v', 'gas', 'value', 'blockNumber', 'gasPrice', 'transactionIndex']
             rpc_ret['result'] = decimal_converter(rpc_ret['result'], values)
@@ -163,6 +163,16 @@ class ethrpc(object):
         if rpc_ret['status'] == 'success':
             values = ['transactionIndex', 'blockNumber', 'cumulativeGasUsed', 'gasUsed']
             rpc_ret['result'] = decimal_converter(rpc_ret['result'], values)
+        return rpc_ret
+
+
+    def eth_getTransactionCount(self, tx_hash):
+        '''
+            Returns the number of transactions sent from an address
+        '''
+        rpc_ret = self.jsonrpc('eth_getTransactionCount', [tx_hash, "latest"])
+        if rpc_ret['status'] == 'success':
+            rpc_ret = decimal_converter(rpc_ret, ['result'])
         return rpc_ret
 
 
@@ -196,7 +206,6 @@ class ethrpc(object):
         if weis is not None:
             tx['value'] = hex(weis)
         tx['to'] = dst
-        print tx
         rpc_ret = self.jsonrpc('eth_estimateGas', [tx], 1)
         if rpc_ret['status'] == 'success':
             rpc_ret = decimal_converter(rpc_ret, ['result'])
@@ -217,10 +226,16 @@ class ethrpc(object):
         if data is not None:
             tx['data'] = hex(data)
         params = [tx]
-        print params
         ret = self.jsonrpc('eth_sendTransaction', params, 1)
-        print "ret: %s" % ret
         return ret
 
 
+    def eth_sendRawTransaction(self, signed_tx):
+        '''
+            Creates new message call transaction or a contract creation for signed transactions.
+        '''
+        param = [signed_tx]
+        ret = self.jsonrpc('eth_sendRawTransaction', param, 1)
+	print ret
+        return ret
 
