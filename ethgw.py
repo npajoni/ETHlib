@@ -152,7 +152,7 @@ def calculate_fee(discount, src, dst, weis, gas_price=None):
             gas_price = resp['result']
         else:
             return resp
-<<<<<<< HEAD
+
     if discount:
         fee = int(gas_used['result']) * int(gas_price)
         if fee >= weis:
@@ -163,14 +163,6 @@ def calculate_fee(discount, src, dst, weis, gas_price=None):
     else:
         fee = 0
         tx_amount = weis
-=======
-    fee = int(gas_used['result']) * int(gas_price)
-    if fee >= weis:
-        message = "Fee value is greater or equal than weis to transfer. Fee: %d - Weis: %d" % (fee, weis)
-        return {'status':'error', 'message': message}
-    # Calculo el monto a transferir sin el fee
-    tx_amount = weis - fee
->>>>>>> f1ee4174e32ba8b0852a2b4ab48e2a5f35b6d6a1
     result = {'weis': tx_amount, 'fee': fee, 'gas':gas_used['result'], 'gas_price':gas_price}
     return {'status':'success', 'result': result}
 
@@ -300,7 +292,6 @@ def send_transaction():
         return Response(response=dumps(resp), status=503)
 
     # Si el monto incluye fee, se lo descuento antes de transferir
-<<<<<<< HEAD
     resp = calculate_fee(content['inc_fee'], content['source'], content['destination'], content['weis'], content['gas_price'])
     if resp['status'] == 'success':
         content['weis']      = resp['result']['weis']
@@ -309,19 +300,6 @@ def send_transaction():
             content['gas'] = resp['result']['gas']
         if content['gas_price'] is None:
             content['gas_price'] = resp['result']['gas_price']
-=======
-    if content['inc_fee']:
-        resp = discount_fee(content['source'], content['destination'], content['weis'], content['gas_price'])
-        if resp['status'] == 'success':
-            content['weis']      = resp['result']['weis']
-            fee                  = resp['result']['fee']
-            if content['gas'] is None:
-                content['gas'] = resp['result']['gas']
-            if content['gas_price'] is None:
-                content['gas_price'] = resp['result']['gas_price']
-        else:
-            return Response(response=dumps(resp), status=400)
->>>>>>> f1ee4174e32ba8b0852a2b4ab48e2a5f35b6d6a1
     else:
         return Response(response=dumps(resp), status=400)
 
@@ -357,7 +335,6 @@ def send_transaction():
         status = 201
     else:
         status = 400
-<<<<<<< HEAD
 
     return Response(response=dumps(resp), status=status)
 
@@ -456,8 +433,6 @@ def send_raw_transaction():
         status = 201
     else:
         status = 400
-=======
->>>>>>> f1ee4174e32ba8b0852a2b4ab48e2a5f35b6d6a1
 
     return Response(response=dumps(resp), status=status)
 
