@@ -15,6 +15,7 @@ import hashlib
 from keys import S3
 from lib.s3 import *
 
+from btckeys import btckeys
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -64,6 +65,17 @@ class addrDB(object):
                 pk = f.read()
                 f.close()
                 return pk
+        except Exception as e:
+            raise addrDBException(str(e))
+
+    def setAddrPK(self, addr, pk):
+	if os.path.isfile(self.path + addr):
+	    raise addrDBException('The addr: %s already exist' % addr)
+
+	try:
+            with open(self.path + addr, 'w') as f:
+                f.write(pk)
+                f.close()
         except Exception as e:
             raise addrDBException(str(e))
 
@@ -190,16 +202,18 @@ def lock_account(address):
     resp = eth.personal_lockAccount(address)
     if resp['status'] == 'success':
         if not resp['result']:
-            resp   = {'status':'error', 'message':'account could not be unlocked'}
+            resp   = {'status':'error', 'message':'account could not be locked'}
 
     return resp
 
 # Devuelve el numero de transaction actual para la addr indicada.
 def get_transaction_count(address):
     resp = eth.eth_getTransactionCount(address)
+    print "TX_nonce"
+    print resp
     if resp['status'] == 'success':
-        if not resp['result']:
-            resp   = {'status':'error', 'message':'account could not be unlocked'}
+        if not 'result' in resp:
+            resp   = {'status':'error', 'message':'error getting transaction nonce'}
 
     return resp
 
@@ -645,6 +659,25 @@ def create_account():
             status = 503
     return Response(response=dumps(resp), status=status)
 
+# Crear una wallet y devuelve la adresss. A diferencia de create_acount() generar una billetera para raw transaction
+@ethgw.route('/wallet/create/', methods=["GET"])
+@ethgw.route('/wallet/create', methods=["GET"])
+def create_wallet():
+    """
+	generacion de addr y pk
+    """
+    pk      = btckeys.from_random()
+    addr    = pk.to_eth_addr()
+    privkey = "0x" + pk.private_key
+    try:
+	addrdb.setAddrPK(addr, privkey)
+	resp   = {'status': 'success', 'result': addr}
+	status = 200
+    except addrDBException as error:
+	message = "create_wallet(): Error creating file: %s" % error.value
+        resp = {'status': 'error', 'message': message}
+        status = 503
+    return Response(response=dumps(resp), status=status)
 
 # Devuelve el numero del ultimo bloque
 @ethgw.route('/block/last/', methods=["GET"])
